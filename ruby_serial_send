@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+
+require SerialPort
+
+s = new SerialPort('/dev/cu.usbmodem1431')
+
