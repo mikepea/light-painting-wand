@@ -43,6 +43,7 @@ void setup() {
 
   digitalWrite(serialLed, HIGH);
   digitalWrite(timingLed, HIGH);
+  digitalWrite(stripSendLed, HIGH);
 
   digitalWrite(statusLed, HIGH);
   delay(500);
