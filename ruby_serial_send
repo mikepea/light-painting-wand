@@ -1,6 +1,37 @@
 #!/usr/bin/env ruby
 
-require SerialPort
+require "serialport"
+ 
+#params for serial port
+port_str = ARGV[0] # serial device
+baud_rate = 115200
+data_bits = 8
+stop_bits = 1
+parity = SerialPort::NONE
 
-s = new SerialPort('/dev/cu.usbmodem1431')
+unless port_str 
+  puts "usage: $0 {serial-device}"
+  exit
+end
+  
+
+sp = SerialPort.new(port_str, baud_rate, data_bits, stop_bits, parity)
+
+   
+#just read forever
+while true do
+  pattern = 360.times.map { Random.rand(255) }
+  ack = sp.readline('\r')
+  puts ack
+  if ( ack =~ /READY/ )
+    puts "writing..."
+    pattern.each do |colour|
+      puts colour
+      sp.write(colour)
+    end
+    puts "written..."
+  end
+  sleep 1;
+end                       
+sp.close  
 
