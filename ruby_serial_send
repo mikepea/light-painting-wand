@@ -17,18 +17,33 @@ end
   
 sp = SerialPort.new(port_str, baud_rate, data_bits, stop_bits, parity)
 
+def convertToHexString(p) 
+  line = p.map { |b| sprintf("%02x",b) }.join
+  return line
+end
+
+NUM_PIXELS = 30
+
+pattern = Array.new
+pattern << NUM_PIXELS.times.map { [ 0,0,0 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 255,0,0 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 0,255,0 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 0,0,255 ] }.flatten
+
+loopCounter = 0
+
 #just read forever
 while true do
-  pattern = 60.times.map { Random.rand(255) }
+  #pattern = ( NUM_PIXELS * 3 ).times.map { Random.rand(255) }
+  data = convertToHexString(pattern[loopCounter % 4])
   ack = sp.readline()
   puts ack
   if ( ack =~ /READY/ )
     puts "writing..."
-    #pattern.each do |colour|
-      #puts colour
-      sp.write('Yaabbcc000000aabbcc000000aabbcc000000Z')
-    #end
+    puts 'Y' + data + 'Z'
+    sp.write('Y' + data + 'Z')
   end
-end                       
-sp.close  
+  loopCounter += 1;
+end
+sp.close
 

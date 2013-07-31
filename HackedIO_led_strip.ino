@@ -1,7 +1,7 @@
 #include <Adafruit_NeoPixel.h>
 
 #define PIN 6
-#define NUM_PIXELS 120
+#define NUM_PIXELS 60
 #define SERIAL_RESP_DELAY 100
 
 // Parameter 1 = number of pixels in strip
@@ -66,8 +66,12 @@ void setup() {
     delay(200);
   }
 
+  Serial.print("Size of displayBuffer: ");
+  Serial.println(bufferSize);
+
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
+  fullStripDisplay(); // show initial pattern
 
   delay(500);
   digitalWrite(serialLed, LOW);
@@ -94,7 +98,7 @@ void loop() {
     getDataFromSerial();
   }
 
-  updateDisplayIfTimingCorrect(displayBuffer, updateIntervalMillis);
+  updateDisplayIfTimingCorrect(updateIntervalMillis);
 
   if ( loopCounter == 5000 ) {
     digitalWrite(timingLed, HIGH);
@@ -170,11 +174,12 @@ void processIncomingByte(uint8_t b) {
 
   } else if ( bufPos >= NUM_PIXELS*3 ) {
     // urg, too much data
+    Serial.println("==== too much serial data sent!");
     readIntoBuffer = false;
   }
 
-  Serial.print("byteCounter: ");
-  Serial.println(byteCounter);
+  //Serial.print("byteCounter: ");
+  //Serial.println(byteCounter);
 
 }
 
@@ -195,10 +200,10 @@ uint8_t convertAsciiHexToBin(uint8_t hexDigit) {
 
 }
 
-bool updateDisplayIfTimingCorrect(uint8_t *buffer, uint32_t wait ) {
+bool updateDisplayIfTimingCorrect(uint32_t wait ) {
   if ( millis() - lastDisplayMillis > wait ) {
     Serial.println("displaying buffer");
-    fullStripSet(buffer);
+    fullStripDisplay();
     lastDisplayMillis = millis();
     return true;
   } else {
@@ -214,14 +219,20 @@ void fullStripSetSingleColour(uint32_t c) {
   Serial.println();
 }
 
-void fullStripSet(uint8_t *buffer) {
+void fullStripDisplay() {
   digitalWrite(stripSendLed, HIGH);
+  uint32_t c;
   for(uint16_t i=0; i<strip.numPixels(); i++) {
-    strip.setPixelColor(i, buffer[(i*3)], buffer[(i*3)+1], buffer[(i*3)+2]);
-    Serial.print(buffer[(i*3)], HEX);
-    Serial.print(buffer[(i*3)+1], HEX);
-    Serial.print(buffer[(i*3)+2], HEX);
-    Serial.print(' ');
+    c = strip.Color( displayBuffer[(i*3)], displayBuffer[(i*3)+1], displayBuffer[(i*3)+2] );
+    strip.setPixelColor(i, c);
+    Serial.print(i);
+    Serial.print(':');
+    Serial.print(displayBuffer[(i*3)], HEX);
+    Serial.print(',');
+    Serial.print(displayBuffer[(i*3)+1], HEX);
+    Serial.print(',');
+    Serial.print(displayBuffer[(i*3)+2], HEX);
+    Serial.println();
   }
   strip.show();
   Serial.println();
