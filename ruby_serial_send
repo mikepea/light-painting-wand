@@ -4,7 +4,8 @@ require "serialport"
  
 #params for serial port
 port_str = ARGV[0] # serial device
-baud_rate = 115200
+#baud_rate = ARGV[1].to_i || 115200
+baud_rate = 9600
 data_bits = 8
 stop_bits = 1
 parity = SerialPort::NONE
@@ -14,24 +15,20 @@ unless port_str
   exit
 end
   
-
 sp = SerialPort.new(port_str, baud_rate, data_bits, stop_bits, parity)
 
-   
 #just read forever
 while true do
-  pattern = 360.times.map { Random.rand(255) }
-  ack = sp.readline('\r')
+  pattern = 60.times.map { Random.rand(255) }
+  ack = sp.readline()
   puts ack
   if ( ack =~ /READY/ )
     puts "writing..."
-    pattern.each do |colour|
-      puts colour
-      sp.write(colour)
-    end
-    puts "written..."
+    #pattern.each do |colour|
+      #puts colour
+      sp.write('Yaabbcc000000aabbcc000000aabbcc000000Z')
+    #end
   end
-  sleep 1;
 end                       
 sp.close  
 

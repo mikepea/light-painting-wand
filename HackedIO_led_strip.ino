@@ -2,7 +2,7 @@
 
 #define PIN 6
 #define NUM_PIXELS 120
-
+#define SERIAL_RESP_DELAY 100
 
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = pin number (most are valid)
@@ -13,18 +13,10 @@
 //   NEO_KHZ800  800 KHz bitstream (e.g. High Density LED strip)
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXELS, PIN, NEO_GRB + NEO_KHZ800);
 
-typedef struct {
-  uint8_t x[NUM_PIXELS * 3];
-} stripLine;
+const uint16_t bufferSize = NUM_PIXELS * 3;
+uint8_t displayBuffer[bufferSize]; // RGB byte triples
 
-uint8_t displayBuffer[NUM_PIXELS * 3]; // RGB byte pairs
-uint8_t serialBuffer[NUM_PIXELS * 3]; // RGB byte pairs
-uint8_t incomingByte;
-uint8_t lastByte;
-uint8_t lastButOneByte;
-bool populateBuffer = 1;
-uint8_t headerCounter = 0;
-uint16_t bufPos = 0;
+uint8_t bufPos = 0;
 
 uint32_t lastDisplayMillis = 0;
 uint32_t updateIntervalMillis = 1000;
@@ -34,6 +26,7 @@ const int timingLed = 14;
 const int serialLed = 15;
 const int stripSendLed = 16;
 
+uint32_t loopCounter = 0;
 
 void setup() {
   pinMode(statusLed, OUTPUT);
@@ -44,25 +37,22 @@ void setup() {
   digitalWrite(serialLed, HIGH);
   digitalWrite(timingLed, HIGH);
   digitalWrite(stripSendLed, HIGH);
-
   digitalWrite(statusLed, HIGH);
+
   delay(500);
   digitalWrite(statusLed, LOW);
-  delay(100);
+  delay(500);
   digitalWrite(statusLed, HIGH);
   delay(500);
 
   // initialise buffer
   for ( uint16_t i=0; i<NUM_PIXELS; i++ ) {
-    displayBuffer[i * 3] = 255;
-    displayBuffer[i * 3 + 1] = 0;
-    displayBuffer[i * 3 + 2] = 0;
-    serialBuffer[i * 3] = 0;
-    serialBuffer[i * 3 + 1] = 0;
-    serialBuffer[i * 3 + 2] = 0;
+    displayBuffer[i * 3] = 0;
+    displayBuffer[i * 3 + 1] = 128;
+    displayBuffer[i * 3 + 2] = 64;
   }
 
-  Serial.begin(115200);
+  Serial.begin(9600);
 
   while (!Serial) {
     digitalWrite(serialLed, HIGH);
@@ -71,97 +61,145 @@ void setup() {
     delay(100);
   }
 
+  for ( uint8_t i=0; i<5; i++) {
+    Serial.println(i);
+    delay(200);
+  }
+
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
 
-  digitalWrite(statusLed, HIGH);
   delay(500);
-  digitalWrite(statusLed, LOW);
-  delay(500);
-  digitalWrite(statusLed, HIGH);
-  delay(500);
-  digitalWrite(statusLed, LOW);
-
   digitalWrite(serialLed, LOW);
+  delay(500);
   digitalWrite(timingLed, LOW);
+  delay(500);
 
 }
 
-bool updateSerialBuffer = false;
-uint32_t loopCounter = 0;
+
+bool readyToAskForData = true;
+bool readyToReceiveData = false;
+uint32_t timeLastAskedForData = 0;
 
 void loop() {
 
-  if ( updateSerialBuffer ) {
-    if ( getDataFromSerial() ) {
-      for ( uint16_t i=0; i<(NUM_PIXELS*3); i++) {
-        displayBuffer[i] = serialBuffer[i];
-      }
-      updateSerialBuffer = false;
-    } 
+  digitalWrite(statusLed, loopCounter % 2);
+
+  if ( readyToAskForData ) {
+    requestDataFromSerial();
   }
 
-  if ( updateDisplayIfTimingCorrect(displayBuffer, updateIntervalMillis) ) {
-    updateSerialBuffer = true;
+  if ( readyToReceiveData ) {
+    getDataFromSerial();
   }
+
+  updateDisplayIfTimingCorrect(displayBuffer, updateIntervalMillis);
+
+  if ( loopCounter == 5000 ) {
+    digitalWrite(timingLed, HIGH);
+    //fullStripSetSingleColour(strip.Color(128,128,0));
+  } else if ( loopCounter == 0 ) {
+    digitalWrite(timingLed, LOW);
+    //fullStripSetSingleColour(strip.Color(0,128,128));
+  } 
 
   loopCounter++;
   loopCounter %= 10000;
 
-  if ( loopCounter == 5000 ) {
-    digitalWrite(timingLed, HIGH);
-    fullStripSetSingleColour(strip.Color(128,128,0));
-  } else if ( loopCounter == 0 ) {
-    digitalWrite(timingLed, LOW);
-    strip.show(); // blank
-  } 
-
-  digitalWrite(statusLed, HIGH);
-
 }
 
 void requestDataFromSerial() {
-  if (Serial) {
+  if (millis() - timeLastAskedForData > 500 && Serial.available() <= 0) {
     Serial.println("READY\n\r");
-  }
-}
-
-void ackDataFromSerial() {
-  if (Serial) {
-    Serial.println("PACKET_RECEIVED\n\r");
-  }
-}
-
-void abortDataFromSerial() {
-  if (Serial) {
-    Serial.println("PACKET_FAILED\n\r");
+    bufPos = 0;
+    //readyToAskForData = false;
+    readyToReceiveData = true;
+    timeLastAskedForData = millis();
   }
 }
 
 bool getDataFromSerial() {
-  uint16_t bufPos = 0;
+  uint8_t bytesRead = 0;
   while ( Serial.available() > 0 ) {
-    digitalWrite(serialLed, HIGH);
-    lastButOneByte = lastByte;
-    lastByte = incomingByte;
-    incomingByte = Serial.read();
-    if ( bufPos < ( NUM_PIXELS * 3) ) {
-      serialBuffer[bufPos] = incomingByte;
-      bufPos++;
-      digitalWrite(serialLed, LOW);
-    } else {
-      return false;  // should not get here - if we transmit NUM_PIXELS*3 bytes correctly that is.
+    uint8_t c = Serial.read();
+    processIncomingByte(c);
+    bytesRead++;
+    if ( bytesRead > 50 ) {
+      Serial.println("overflow!");
+      break;
     }
-  }
-  if ( bufPos < (NUM_PIXELS * 3) ) {
-     // bad packet - too small.
-     return false;
   }
 }
 
+bool readIntoBuffer = false;
+uint16_t byteCounter = 0;
+
+void processIncomingByte(uint8_t b) {
+  if ( b == 'Y' ) {
+    readIntoBuffer = true;
+    bufPos = 0;
+    byteCounter = 0;
+    Serial.println("==== got header!");
+
+  } else if ( b == 'Z' ) {
+    // end of transmission
+    // fill rest with zeros
+    for ( uint16_t i=bufPos; i < bufferSize; i++ ) {
+      displayBuffer[i] = 0;
+    }
+    readIntoBuffer = false;
+    Serial.println("==== got footer!");
+
+  } else if ( readIntoBuffer && bufPos < bufferSize ) {
+    uint8_t val = convertAsciiHexToBin(b);
+    if ( val != 255 ) {
+
+      if ( byteCounter % 2 == 0 ) { 
+        // high octet
+        displayBuffer[bufPos] = val << 4;
+        byteCounter++;
+      } else {
+        // low octet 
+        displayBuffer[bufPos] += val;
+        bufPos++;
+        byteCounter++;
+      }
+
+    }
+
+  } else if ( bufPos >= NUM_PIXELS*3 ) {
+    // urg, too much data
+    readIntoBuffer = false;
+  }
+
+  Serial.print("byteCounter: ");
+  Serial.println(byteCounter);
+
+}
+
+uint8_t convertAsciiHexToBin(uint8_t hexDigit) {
+  if ( hexDigit >= 97 && hexDigit <= 102 ) {
+    // a-f
+    return (hexDigit - 87);
+  } else if ( hexDigit >= 65 && hexDigit <= 70 ) {
+    // A-F
+    return (hexDigit - 55);
+  } else if ( hexDigit >= 48 && hexDigit <= 57 ) {
+    // 0-9
+    return (hexDigit - 48);
+  } else {
+    // fail
+    return 255;
+  }
+
+}
+
 bool updateDisplayIfTimingCorrect(uint8_t *buffer, uint32_t wait ) {
-  if ( lastDisplayMillis - millis() > wait ) {
-    //fullStripSet(buffer);
+  if ( millis() - lastDisplayMillis > wait ) {
+    Serial.println("displaying buffer");
+    fullStripSet(buffer);
+    lastDisplayMillis = millis();
     return true;
   } else {
     return false;
@@ -170,18 +208,22 @@ bool updateDisplayIfTimingCorrect(uint8_t *buffer, uint32_t wait ) {
 
 void fullStripSetSingleColour(uint32_t c) {
   for(uint16_t i=0; i<strip.numPixels(); i++) {
-    digitalWrite(stripSendLed, HIGH);
-    delay(50);
     strip.setPixelColor(i, c);
-    digitalWrite(stripSendLed, LOW);
-    delay(50);
   }
   strip.show();
+  Serial.println();
 }
 
-void fullStripSet(uint8_t *c) {
+void fullStripSet(uint8_t *buffer) {
+  digitalWrite(stripSendLed, HIGH);
   for(uint16_t i=0; i<strip.numPixels(); i++) {
-    strip.setPixelColor(i, c[(i*3)], c[(i*3)+1], c[(i*3)+2]);
+    strip.setPixelColor(i, buffer[(i*3)], buffer[(i*3)+1], buffer[(i*3)+2]);
+    Serial.print(buffer[(i*3)], HEX);
+    Serial.print(buffer[(i*3)+1], HEX);
+    Serial.print(buffer[(i*3)+2], HEX);
+    Serial.print(' ');
   }
   strip.show();
+  Serial.println();
+  digitalWrite(stripSendLed, LOW);
 }
