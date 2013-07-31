@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 
 require "serialport"
+
+NUM_PIXELS = 60
  
 #params for serial port
 port_str = ARGV[0] # serial device
 #baud_rate = ARGV[1].to_i || 115200
-baud_rate = 9600
+baud_rate = 115200
 data_bits = 8
 stop_bits = 1
 parity = SerialPort::NONE
@@ -22,28 +24,30 @@ def convertToHexString(p)
   return line
 end
 
-NUM_PIXELS = 30
 
 pattern = Array.new
-pattern << NUM_PIXELS.times.map { [ 0,0,0 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 255,0,0 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 0,255,0 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 0,0,255 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 64,0,0 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 64,64,0 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 0,64,0 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 0,64,64 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 0,0,64 ] }.flatten
+pattern << NUM_PIXELS.times.map { [ 64,0,64 ] }.flatten
+
 
 loopCounter = 0
 
 #just read forever
 while true do
   #pattern = ( NUM_PIXELS * 3 ).times.map { Random.rand(255) }
-  data = convertToHexString(pattern[loopCounter % 4])
   ack = sp.readline()
   puts ack
   if ( ack =~ /READY/ )
+    data = convertToHexString(pattern[loopCounter % pattern.size])
     puts "writing..."
     puts 'Y' + data + 'Z'
     sp.write('Y' + data + 'Z')
+    loopCounter += 1;
   end
-  loopCounter += 1;
 end
 sp.close
 

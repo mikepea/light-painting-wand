@@ -2,7 +2,8 @@
 
 #define PIN 6
 #define NUM_PIXELS 60
-#define SERIAL_RESP_DELAY 100
+
+#define SERIAL_BAUD 115200
 
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = pin number (most are valid)
@@ -19,7 +20,8 @@ uint8_t displayBuffer[bufferSize]; // RGB byte triples
 uint8_t bufPos = 0;
 
 uint32_t lastDisplayMillis = 0;
-uint32_t updateIntervalMillis = 1000;
+uint32_t updateIntervalMillis = 50;
+uint32_t serialWaitMillis = 1000;
 
 const int statusLed = 13;
 const int timingLed = 14;
@@ -52,7 +54,7 @@ void setup() {
     displayBuffer[i * 3 + 2] = 64;
   }
 
-  Serial.begin(9600);
+  Serial.begin(SERIAL_BAUD);
 
   while (!Serial) {
     digitalWrite(serialLed, HIGH);
@@ -90,9 +92,7 @@ void loop() {
 
   digitalWrite(statusLed, loopCounter % 2);
 
-  if ( readyToAskForData ) {
-    requestDataFromSerial();
-  }
+  requestDataFromSerial();
 
   if ( readyToReceiveData ) {
     getDataFromSerial();
@@ -114,12 +114,14 @@ void loop() {
 }
 
 void requestDataFromSerial() {
-  if (millis() - timeLastAskedForData > 500 && Serial.available() <= 0) {
-    Serial.println("READY\n\r");
-    bufPos = 0;
-    //readyToAskForData = false;
-    readyToReceiveData = true;
-    timeLastAskedForData = millis();
+  if (readyToAskForData || ( millis() - timeLastAskedForData > serialWaitMillis ) ) {
+    if ( Serial.available() <= 0 ) {
+      Serial.println("READY\n\r");
+      bufPos = 0;
+      readyToAskForData = false;
+      readyToReceiveData = true;
+      timeLastAskedForData = millis();
+    }
   }
 }
 
@@ -225,6 +227,7 @@ void fullStripDisplay() {
   for(uint16_t i=0; i<strip.numPixels(); i++) {
     c = strip.Color( displayBuffer[(i*3)], displayBuffer[(i*3)+1], displayBuffer[(i*3)+2] );
     strip.setPixelColor(i, c);
+#ifdef DEBUG_BUFFER_SEND_VALUES
     Serial.print(i);
     Serial.print(':');
     Serial.print(displayBuffer[(i*3)], HEX);
@@ -233,8 +236,9 @@ void fullStripDisplay() {
     Serial.print(',');
     Serial.print(displayBuffer[(i*3)+2], HEX);
     Serial.println();
+#endif
   }
   strip.show();
-  Serial.println();
+  readyToAskForData = true;
   digitalWrite(stripSendLed, LOW);
 }
