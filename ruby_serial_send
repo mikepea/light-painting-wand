@@ -2,10 +2,14 @@
 
 require "serialport"
 
-NUM_PIXELS = 60
+NUM_PIXELS = 120
+MAX_PACKET_SIZE = 60
+SERIAL_DELAY = 0.001
+GAMMA_FIX_VALUES = 1.0
  
 #params for serial port
 port_str = ARGV[0] # serial device
+image = ARGV[1] # image file (RGB)
 #baud_rate = ARGV[1].to_i || 115200
 baud_rate = 115200
 data_bits = 8
@@ -21,33 +25,51 @@ sp = SerialPort.new(port_str, baud_rate, data_bits, stop_bits, parity)
 
 def convertToHexString(p) 
   line = p.map { |b| sprintf("%02x",b) }.join
+  puts line.gsub(/([0-9a-f]{6})/, '\1 ')
   return line
 end
 
-
-pattern = Array.new
-pattern << NUM_PIXELS.times.map { [ 64,0,0 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 64,64,0 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 0,64,0 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 0,64,64 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 0,0,64 ] }.flatten
-pattern << NUM_PIXELS.times.map { [ 64,0,64 ] }.flatten
-
-
 loopCounter = 0
 
+def writeData(sp, p)
+    sp.write('Y')
+    while ( p.size > 0 ) do
+        data = convertToHexString(p.shift(MAX_PACKET_SIZE))
+        sp.write(data)
+        sleep(SERIAL_DELAY)
+    end
+    sp.write('Z')
+end
+
+def processImage(file)
+  filename = File.basename(file)
+  filebase = File.basename(file, ".*") # image.{jpeg,bmp,jpg,png} becomes image
+  tempdir = `mktemp -d /tmp/ruby_send_serial.XXXXX`.chomp
+  `convert #{file} -rotate 90 #{tempdir}/rotated_#{filename}`
+  `convert #{tempdir}/rotated_#{filename} -resize #{NUM_PIXELS} #{tempdir}/resized_#{filename}`
+  `convert #{tempdir}/resized_#{filename} -gamma #{GAMMA_FIX_VALUES} #{tempdir}/gamma_fixed_#{filename}`
+  `convert #{tempdir}/gamma_fixed_#{filename} #{tempdir}/#{filebase}.rgb`
+  return "#{tempdir}/#{filebase}.rgb"
+end
+
+rgb_image = processImage(image);
+
 #just read forever
-while true do
-  #pattern = ( NUM_PIXELS * 3 ).times.map { Random.rand(255) }
-  ack = sp.readline()
-  puts ack
-  if ( ack =~ /READY/ )
-    data = convertToHexString(pattern[loopCounter % pattern.size])
-    puts "writing..."
-    puts 'Y' + data + 'Z'
-    sp.write('Y' + data + 'Z')
-    loopCounter += 1;
+#while true do
+File.open(rgb_image) do |file|
+  until file.eof? 
+    ack = sp.readline()
+    puts ack
+    if ( ack =~ /READY/ )
+      puts "Line #{loopCounter}"
+      scan_line = file.read(NUM_PIXELS * 3)
+      writeData(sp, scan_line.unpack('C*'))
+      loopCounter += 1
+      #key = STDIN.gets
+    end
   end
 end
+writeData(sp, [0,0,0])
+
 sp.close
 

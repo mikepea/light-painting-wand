@@ -1,7 +1,7 @@
 #include <Adafruit_NeoPixel.h>
 
 #define PIN 6
-#define NUM_PIXELS 60
+#define NUM_PIXELS 120
 
 #define SERIAL_BAUD 115200
 
@@ -15,13 +15,12 @@
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(NUM_PIXELS, PIN, NEO_GRB + NEO_KHZ800);
 
 const uint16_t bufferSize = NUM_PIXELS * 3;
-uint8_t displayBuffer[bufferSize]; // RGB byte triples
 
-uint8_t bufPos = 0;
+uint8_t brightness = 10;
 
 uint32_t lastDisplayMillis = 0;
-uint32_t updateIntervalMillis = 50;
-uint32_t serialWaitMillis = 1000;
+uint32_t updateIntervalMillis = 75;
+uint32_t serialTimeOutMillis = 1000;
 
 const int statusLed = 13;
 const int timingLed = 14;
@@ -30,66 +29,33 @@ const int stripSendLed = 16;
 
 uint32_t loopCounter = 0;
 
-void setup() {
-  pinMode(statusLed, OUTPUT);
-  pinMode(serialLed, OUTPUT);
-  pinMode(timingLed, OUTPUT);
-  pinMode(stripSendLed, OUTPUT);
-
-  digitalWrite(serialLed, HIGH);
-  digitalWrite(timingLed, HIGH);
-  digitalWrite(stripSendLed, HIGH);
-  digitalWrite(statusLed, HIGH);
-
-  delay(500);
-  digitalWrite(statusLed, LOW);
-  delay(500);
-  digitalWrite(statusLed, HIGH);
-  delay(500);
-
-  // initialise buffer
-  for ( uint16_t i=0; i<NUM_PIXELS; i++ ) {
-    displayBuffer[i * 3] = 0;
-    displayBuffer[i * 3 + 1] = 128;
-    displayBuffer[i * 3 + 2] = 64;
-  }
-
-  Serial.begin(SERIAL_BAUD);
-
-  while (!Serial) {
-    digitalWrite(serialLed, HIGH);
-    delay(100);
-    digitalWrite(serialLed, LOW);
-    delay(100);
-  }
-
-  for ( uint8_t i=0; i<5; i++) {
-    Serial.println(i);
-    delay(200);
-  }
-
-  Serial.print("Size of displayBuffer: ");
-  Serial.println(bufferSize);
-
-  strip.begin();
-  strip.show(); // Initialize all pixels to 'off'
-  fullStripDisplay(); // show initial pattern
-
-  delay(500);
-  digitalWrite(serialLed, LOW);
-  delay(500);
-  digitalWrite(timingLed, LOW);
-  delay(500);
-
-}
-
-
 bool readyToAskForData = true;
 bool readyToReceiveData = false;
 uint32_t timeLastAskedForData = 0;
 
+bool readIntoBuffer = false;
+uint16_t byteCounter = 0;
+uint16_t colorPos = 0;
+uint32_t colorBuf = 0;
+
+uint8_t r;
+uint8_t g;
+uint8_t b;
+
+void setup() {
+  setupLedOutputs();
+  displayLedBootSeq();
+  initialiseLedStrip();
+  initialiseDisplayBuffer();
+  fullStripDisplay();
+  setupAndWaitForSerial();
+  serialBootSequenceDisplay();
+  displayLedBootTrailSeq();
+}
+
 void loop() {
 
+  // toggle status LED state, so we know how fast we're looping
   digitalWrite(statusLed, loopCounter % 2);
 
   requestDataFromSerial();
@@ -114,10 +80,10 @@ void loop() {
 }
 
 void requestDataFromSerial() {
-  if (readyToAskForData || ( millis() - timeLastAskedForData > serialWaitMillis ) ) {
+  if (readyToAskForData || ( millis() - timeLastAskedForData > serialTimeOutMillis ) ) {
     if ( Serial.available() <= 0 ) {
       Serial.println("READY\n\r");
-      bufPos = 0;
+      colorPos = 0;
       readyToAskForData = false;
       readyToReceiveData = true;
       timeLastAskedForData = millis();
@@ -138,50 +104,67 @@ bool getDataFromSerial() {
   }
 }
 
-bool readIntoBuffer = false;
-uint16_t byteCounter = 0;
 
-void processIncomingByte(uint8_t b) {
-  if ( b == 'Y' ) {
+void processIncomingByte(uint8_t byte) {
+  if ( byte == 'Y' ) {
     readIntoBuffer = true;
-    bufPos = 0;
+    colorPos = 0;
     byteCounter = 0;
     Serial.println("==== got header!");
 
-  } else if ( b == 'Z' ) {
+  } else if ( byte == 'Z' ) {
     // end of transmission
     // fill rest with zeros
-    for ( uint16_t i=bufPos; i < bufferSize; i++ ) {
-      displayBuffer[i] = 0;
+    for ( uint16_t i=colorPos; i < strip.numPixels(); i++ ) {
+      strip.setPixelColor(i, strip.Color(0,0,0));
     }
     readIntoBuffer = false;
     Serial.println("==== got footer!");
 
-  } else if ( readIntoBuffer && bufPos < bufferSize ) {
-    uint8_t val = convertAsciiHexToBin(b);
+  } else if ( readIntoBuffer && ( colorPos < strip.numPixels() ) ) {
+    uint8_t val = convertAsciiHexToBin(byte);
     if ( val != 255 ) {
 
-      if ( byteCounter % 2 == 0 ) { 
-        // high octet
-        displayBuffer[bufPos] = val << 4;
-        byteCounter++;
-      } else {
-        // low octet 
-        displayBuffer[bufPos] += val;
-        bufPos++;
-        byteCounter++;
+      // build up a 32-bit strip color, via 6 hex digits
+      switch ( byteCounter ) {
+        case 0: // high octet red
+          r = val << 4;
+          byteCounter++;
+          break;
+        case 1: // low octet red
+          r += val;
+          byteCounter++;
+          break;
+        case 2: // high octet green
+          g = val << 4;
+          byteCounter++;
+          break;
+        case 3: // low octet green
+          g += val;
+          byteCounter++;
+          break;
+        case 4: // high octet blue
+          b = val << 4;
+          byteCounter++;
+          break;
+        case 5: // low octet blue
+          b += val;
+          // end of color, so set it and clear buffer.
+          strip.setPixelColor(colorPos, r, g, b);
+          r = 0; g = 0; b = 0; // set to black/off for rewriting
+          byteCounter = 0;
+          colorPos++;
+          break;
+          
       }
 
     }
 
-  } else if ( bufPos >= NUM_PIXELS*3 ) {
+  } else if ( colorPos >= strip.numPixels() ) {
     // urg, too much data
     Serial.println("==== too much serial data sent!");
     readIntoBuffer = false;
   }
-
-  //Serial.print("byteCounter: ");
-  //Serial.println(byteCounter);
 
 }
 
@@ -206,6 +189,7 @@ bool updateDisplayIfTimingCorrect(uint32_t wait ) {
   if ( millis() - lastDisplayMillis > wait ) {
     Serial.println("displaying buffer");
     fullStripDisplay();
+    readyToAskForData = true;
     lastDisplayMillis = millis();
     return true;
   } else {
@@ -222,23 +206,66 @@ void fullStripSetSingleColour(uint32_t c) {
 }
 
 void fullStripDisplay() {
-  digitalWrite(stripSendLed, HIGH);
-  uint32_t c;
-  for(uint16_t i=0; i<strip.numPixels(); i++) {
-    c = strip.Color( displayBuffer[(i*3)], displayBuffer[(i*3)+1], displayBuffer[(i*3)+2] );
-    strip.setPixelColor(i, c);
-#ifdef DEBUG_BUFFER_SEND_VALUES
-    Serial.print(i);
-    Serial.print(':');
-    Serial.print(displayBuffer[(i*3)], HEX);
-    Serial.print(',');
-    Serial.print(displayBuffer[(i*3)+1], HEX);
-    Serial.print(',');
-    Serial.print(displayBuffer[(i*3)+2], HEX);
-    Serial.println();
-#endif
-  }
+  strip.setBrightness(brightness);
   strip.show();
-  readyToAskForData = true;
-  digitalWrite(stripSendLed, LOW);
 }
+
+void setupLedOutputs() {
+  pinMode(statusLed, OUTPUT);
+  pinMode(serialLed, OUTPUT);
+  pinMode(timingLed, OUTPUT);
+  pinMode(stripSendLed, OUTPUT);
+}
+
+void displayLedBootSeq() {
+  digitalWrite(serialLed, HIGH);
+  digitalWrite(timingLed, HIGH);
+  digitalWrite(stripSendLed, HIGH);
+  digitalWrite(statusLed, HIGH);
+  delay(500);
+  digitalWrite(statusLed, LOW);
+  delay(500);
+  digitalWrite(statusLed, HIGH);
+  delay(500);
+}
+
+void displayLedBootTrailSeq() {
+  delay(500);
+  digitalWrite(serialLed, LOW);
+  delay(500);
+  digitalWrite(timingLed, LOW);
+  delay(500);
+}
+
+void initialiseDisplayBuffer() {
+  for ( uint16_t i=0; i<strip.numPixels(); i++ ) {
+    strip.setPixelColor(i, 0, 0, 16);
+  }
+}
+
+void setupAndWaitForSerial() {
+  Serial.begin(SERIAL_BAUD);
+  while (!Serial) {
+    digitalWrite(serialLed, HIGH);
+    delay(100);
+    digitalWrite(serialLed, LOW);
+    delay(100);
+  }
+}
+
+void serialBootSequenceDisplay() {
+  for ( uint8_t i=0; i<5; i++) {
+    Serial.println(i);
+    delay(200);
+  }
+  Serial.print("Size of displayBuffer: ");
+  Serial.println(bufferSize);
+  Serial.print("Size of LED Strip: ");
+  Serial.println(strip.numPixels());
+}
+
+void initialiseLedStrip() {
+  strip.begin();
+  strip.show(); // Initialize all pixels to 'off'
+}
+
