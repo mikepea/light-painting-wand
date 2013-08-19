@@ -19,7 +19,7 @@ const uint16_t bufferSize = NUM_PIXELS * 3;
 uint8_t brightness = 10;
 
 uint32_t lastDisplayMillis = 0;
-uint32_t updateIntervalMillis = 75;
+uint32_t updateIntervalMillis = 100;
 uint32_t serialTimeOutMillis = 1000;
 
 const int statusLed = 13;
@@ -42,43 +42,6 @@ uint8_t r;
 uint8_t g;
 uint8_t b;
 
-void setup() {
-  setupLedOutputs();
-  displayLedBootSeq();
-  initialiseLedStrip();
-  initialiseDisplayBuffer();
-  fullStripDisplay();
-  setupAndWaitForSerial();
-  serialBootSequenceDisplay();
-  displayLedBootTrailSeq();
-}
-
-void loop() {
-
-  // toggle status LED state, so we know how fast we're looping
-  digitalWrite(statusLed, loopCounter % 2);
-
-  requestDataFromSerial();
-
-  if ( readyToReceiveData ) {
-    getDataFromSerial();
-  }
-
-  updateDisplayIfTimingCorrect(updateIntervalMillis);
-
-  if ( loopCounter == 5000 ) {
-    digitalWrite(timingLed, HIGH);
-    //fullStripSetSingleColour(strip.Color(128,128,0));
-  } else if ( loopCounter == 0 ) {
-    digitalWrite(timingLed, LOW);
-    //fullStripSetSingleColour(strip.Color(0,128,128));
-  } 
-
-  loopCounter++;
-  loopCounter %= 10000;
-
-}
-
 void requestDataFromSerial() {
   if (readyToAskForData || ( millis() - timeLastAskedForData > serialTimeOutMillis ) ) {
     if ( Serial.available() <= 0 ) {
@@ -91,19 +54,22 @@ void requestDataFromSerial() {
   }
 }
 
-bool getDataFromSerial() {
-  uint8_t bytesRead = 0;
-  while ( Serial.available() > 0 ) {
-    uint8_t c = Serial.read();
-    processIncomingByte(c);
-    bytesRead++;
-    if ( bytesRead > 50 ) {
-      Serial.println("overflow!");
-      break;
-    }
+uint8_t convertAsciiHexToBin(uint8_t hexDigit) {
+  if ( hexDigit >= 97 && hexDigit <= 102 ) {
+    // a-f
+    return (hexDigit - 87);
+  } else if ( hexDigit >= 65 && hexDigit <= 70 ) {
+    // A-F
+    return (hexDigit - 55);
+  } else if ( hexDigit >= 48 && hexDigit <= 57 ) {
+    // 0-9
+    return (hexDigit - 48);
+  } else {
+    // fail
+    return 255;
   }
-}
 
+}
 
 void processIncomingByte(uint8_t byte) {
   if ( byte == 'Y' ) {
@@ -168,21 +134,32 @@ void processIncomingByte(uint8_t byte) {
 
 }
 
-uint8_t convertAsciiHexToBin(uint8_t hexDigit) {
-  if ( hexDigit >= 97 && hexDigit <= 102 ) {
-    // a-f
-    return (hexDigit - 87);
-  } else if ( hexDigit >= 65 && hexDigit <= 70 ) {
-    // A-F
-    return (hexDigit - 55);
-  } else if ( hexDigit >= 48 && hexDigit <= 57 ) {
-    // 0-9
-    return (hexDigit - 48);
-  } else {
-    // fail
-    return 255;
-  }
 
+bool getDataFromSerial() {
+  uint8_t bytesRead = 0;
+  while ( Serial.available() > 0 ) {
+    uint8_t c = Serial.read();
+    processIncomingByte(c);
+    bytesRead++;
+    if ( bytesRead > 50 ) {
+      Serial.println("overflow!");
+      break;
+    }
+  }
+}
+
+void fullStripSetSingleColour(uint32_t c) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
+  }
+  strip.show();
+  Serial.println();
+}
+
+
+void fullStripDisplay() {
+  strip.setBrightness(brightness);
+  strip.show();
 }
 
 bool updateDisplayIfTimingCorrect(uint32_t wait ) {
@@ -197,18 +174,6 @@ bool updateDisplayIfTimingCorrect(uint32_t wait ) {
   }
 }
 
-void fullStripSetSingleColour(uint32_t c) {
-  for(uint16_t i=0; i<strip.numPixels(); i++) {
-    strip.setPixelColor(i, c);
-  }
-  strip.show();
-  Serial.println();
-}
-
-void fullStripDisplay() {
-  strip.setBrightness(brightness);
-  strip.show();
-}
 
 void setupLedOutputs() {
   pinMode(statusLed, OUTPUT);
@@ -267,5 +232,44 @@ void serialBootSequenceDisplay() {
 void initialiseLedStrip() {
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
+}
+
+//-----------------------------------------------------------------------------
+
+void setup() {
+  setupLedOutputs();
+  displayLedBootSeq();
+  initialiseLedStrip();
+  initialiseDisplayBuffer();
+  fullStripDisplay();
+  setupAndWaitForSerial();
+  serialBootSequenceDisplay();
+  displayLedBootTrailSeq();
+}
+
+void loop() {
+
+  // toggle status LED state, so we know how fast we're looping
+  digitalWrite(statusLed, loopCounter % 2);
+
+  requestDataFromSerial();
+
+  if ( readyToReceiveData ) {
+    getDataFromSerial();
+  }
+
+  updateDisplayIfTimingCorrect(updateIntervalMillis);
+
+  if ( loopCounter == 5000 ) {
+    digitalWrite(timingLed, HIGH);
+    //fullStripSetSingleColour(strip.Color(128,128,0));
+  } else if ( loopCounter == 0 ) {
+    digitalWrite(timingLed, LOW);
+    //fullStripSetSingleColour(strip.Color(0,128,128));
+  } 
+
+  loopCounter++;
+  loopCounter %= 10000;
+
 }
 

@@ -8,16 +8,16 @@ SERIAL_DELAY = 0.001
 GAMMA_FIX_VALUES = 1.0
  
 #params for serial port
-port_str = ARGV[0] # serial device
-image = ARGV[1] # image file (RGB)
-#baud_rate = ARGV[1].to_i || 115200
-baud_rate = 115200
+image = ARGV[0] # image file (RGB)
+port_str = ARGV[1].nil? ? '/dev/ttyACM0' : ARGV[1]
+baud_rate = ARGV[2].nil? ? 115200 : ARGV[2].to_i
+
 data_bits = 8
 stop_bits = 1
 parity = SerialPort::NONE
 
 unless port_str 
-  puts "usage: $0 {serial-device}"
+  puts "usage: $0 image {serial-device} {baud-rate}"
   exit
 end
   
